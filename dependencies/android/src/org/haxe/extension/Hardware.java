@@ -1,5 +1,7 @@
 package org.haxe.extension;
 
+import org.haxe.lime.HaxeObject;
+
 import android.os.Vibrator;
 import android.graphics.Point;
 import android.view.Display;
@@ -12,10 +14,19 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.view.View;
 
+//WakeUp
 import android.app.KeyguardManager;
 import android.app.KeyguardManager.KeyguardLock;
 import android.os.PowerManager;
 import android.os.PowerManager.WakeLock;
+
+//Timer
+import android.app.AlarmManager;
+import android.app.PendingIntent;
+import android.content.BroadcastReceiver;
+import android.content.IntentFilter;
+import android.os.SystemClock;
+import android.util.Log;
 
 
 /* 
@@ -49,6 +60,12 @@ public class Hardware extends Extension
     public static Point size;
 
     private static KeyguardLock keyguardLock=null;
+    private static HaxeObject onTimerCallback=null;
+    private static boolean timerInited=false;
+    private static PendingIntent pendingIntent=null;
+    private static AlarmManager alarmManager=null;
+    private static BroadcastReceiver mReceiver=null;
+    private static int timerRepeatCount=1;
 
     public static void vibrate(int duration)
     {
@@ -82,6 +99,100 @@ public class Hardware extends Extension
         return size.x;
     }
 
+    public static void initTimer()
+    {
+        timerInited=true;
+        mReceiver = new BroadcastReceiver() 
+        {
+            @Override public void onReceive(Context context, Intent intent)
+            {
+                timeHandler();
+            }
+        };
+        String tag="com.alagatar.quidytime.timer";
+        mainActivity.registerReceiver(mReceiver, new IntentFilter(tag));
+        pendingIntent = PendingIntent.getBroadcast(mainActivity, 0, new Intent(tag), 0);
+        alarmManager = (AlarmManager) mainContext.getSystemService(Context.ALARM_SERVICE);
+    }
+
+    public static void unregisterAlarm()
+    {
+        stopTimer();
+        mainContext.unregisterReceiver(mReceiver);
+
+        alarmManager=null;
+        pendingIntent=null;
+        mReceiver=null;
+    }
+
+    public static void startTimer(int time, HaxeObject callback)
+    {
+        onTimerCallback=callback;
+        timerRepeatCount=0;
+
+        if(timerInited == false)
+        {
+            initTimer();
+        }
+        stopTimer();
+        alarmManager.set(AlarmManager.ELAPSED_REALTIME, SystemClock.elapsedRealtime() + time, pendingIntent);
+    }
+
+    public static void startRepeatTimer(int time, int repeatCount, HaxeObject callback)
+    {
+        onTimerCallback=callback;
+        timerRepeatCount=repeatCount;
+
+        if(timerInited == false)
+        {
+            initTimer();
+        }
+        stopTimer();
+        alarmManager.setRepeating(AlarmManager.ELAPSED_REALTIME, SystemClock.elapsedRealtime() + time, time, pendingIntent);
+    }
+
+    public static void timeHandler()
+    {
+        if(timerRepeatCount > 0)
+        {
+            timerRepeatCount--;
+        }
+        
+        if(timerRepeatCount == 0)
+        {
+            stopTimer();
+        }
+
+        if(timerRepeatCount == 0 || timerRepeatCount == -1)
+        {
+            completeTimer();
+        }
+    }
+
+    public static void completeTimer()
+    {
+        if(onTimerCallback == null)
+        {
+            return;
+        }
+
+        Extension.callbackHandler.post(new Runnable ()
+        {
+            @Override public void run()
+            {
+                onTimerCallback.call0("completeTimer");
+            }
+        });
+    }
+
+    public static void stopTimer()
+    {
+        if(alarmManager != null)
+        {
+            alarmManager.cancel(pendingIntent);
+        }
+    }
+
     /**
     * Called when an activity you launched exits, giving you the requestCode 
     * you started it with, the resultCode it returned, and any additional data 
@@ -108,6 +219,16 @@ public class Hardware extends Extension
         {
             keyguardLock.reenableKeyguard();
             keyguardLock = null;
+        }
+
+        if(timerInited == true)
+        {
+            unregisterAlarm();
+        }
+
+        if(onTimerCallback != null)
+        {
+            onTimerCallback=null;
         }
     }
 
